@@ -4,8 +4,8 @@ import numpy as np
 
 class Team:
     '''Teams are just an id and and elo'''
-    def __init__(self, n, elo=1000):
-        self.id = n
+    def __init__(self, identity, elo=1000):
+        self.id = identity
         self.elo = elo
 
     def __repr__(self):
@@ -59,13 +59,17 @@ class Round(Team):
         return prob
 
     def find_winner(self, match):
+        if match[1].id == 'N/A':
+            return match[0]
+        if match[0].id == 'N/A':
+            return match[1]
         if rand.random() > self.prob_of_winning(match):
             self.winners.append(match[1])
         else:
             self.winners.append(match[0])
 
 
-class Tournament(Round):
+class SingleElimTournament(Round):
     def __init__(self, n=3, min_elo=500, max_elo=1500, teams=[]):
         self.teams = teams
         self.teams_per_round = []
@@ -98,20 +102,58 @@ class Tournament(Round):
                 self.do_round(i, self.teams_per_round[-1][-1])
             i += 1
 
+class DoubleElimTournament(SingleElimTournament):
+    def __init__(self, n=3, min_elo=500, max_elo=1500, teams=[]):
+        SingleElimTournament.__init__(self, n, min_elo, max_elo, teams)
+        self.losers_per_round = []
 
-# how often does the highest elo team win?
-def proportion_of_highest(testN=10000, teamN=3, min_elo=500, max_elo=1500):
-    winners = np.zeros(testN, dtype='int8')
-    highest_count = 0
-    for i in range(testN):
-        tourney = Tournament(teamN, min_elo, max_elo)
-        tourney.make_teams_flat_dist()
-        tourney.do_tourney()
-        winner = tourney.teams_per_round[-1][-1][-1].id
-        winners[i] = winner
-        if winner == 0:
-            highest_count += 1
-    return highest_count / testN
+    def find_champ(self):
+        # once we have our teams we do_tourney to get our winner bracket
+        self.do_tourney()
+        winners_bracket = self.teams_per_round
+
+        # using the winners per round we find the losers per round
+        losers_per_round = []
+        for i in range(len(winners_bracket) - 1):
+            losers = list(set(winners_bracket[i][1]) - set(winners_bracket[i + 1][1]))
+            losers_per_round.append((i + 1, losers))
+        self.losers_per_round = losers_per_round
+
+        prev_winners = []   # winners from previous round in losers bracket
+        for losers in losers_per_round:
+            if prev_winners:
+                # if there were more previous winners then they play off
+                if len(prev_winners) > len(losers[1]):
+                    rnd = Round(prev_winners)
+                # otherwise the prev winners play the new teams that have 
+                # arrived from the winners bracket
+                else:
+                    zipped = [None]*(len(prev_winners) + len(losers[1]))
+                    zipped[::2] = prev_winners
+                    zipped[1::2] = losers[1]
+                    rnd = Round(zipped)
+            # there are initially no prev winners so it's just the losers of
+            # the 1st round of the tourney playing one another
+            else:
+                rnd = Round(losers[1])
+            rnd.make_matches()
+            for match in rnd.matches:
+                rnd.find_winner(match)
+            # after playing through these prev_winners has our losers champ
+            prev_winners = rnd.winners
+        
+        # now the losers and winners bracket champions play
+        match = winners_bracket[-1][-1] + prev_winners
+        rnd = Round(match)
+        rnd.make_matches()
+        rnd.find_winner(rnd.matches[0])
+        return rnd.winners
+
+        #ad the winner only the winner bracket
+        round_num = winners_bracket[-1][0] + 1
+        self.teams_per_round.append((round_num, rnd.winners))
 
 if __name__ == '__main__':
-    print(proportion_of_highest())
+    tourney = DoubleElimTournament()
+    tourney.make_teams_flat_dist()
+    print(tourney.find_champ())
